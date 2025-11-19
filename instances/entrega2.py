@@ -6,6 +6,9 @@ import json
 import random
 import math
 import copy
+import os
+import csv
+import sys
 from collections import defaultdict, Counter
 from typing import Dict, List, Tuple, Optional
 
@@ -117,6 +120,180 @@ def score_solution_lex(instance: dict, assignment: Dict[str, Dict[str, Optional[
             c3_balance += -(mx - mn)
     return (c1_pref_hits, c2_group_cohesion, c3_balance)
 
+
+# ---------- Validación, reporte y exportación ----------
+def _day_order(instance: dict) -> List[str]:
+    return list(instance.get("Days", []))
+
+
+def _groups_meeting_day(instance: dict, assignment: Dict[str, Dict[str, Optional[str]]]) -> Dict[str, str]:
+    days = _day_order(instance)
+    employees_g = instance.get("Employees_G", {})
+    result: Dict[str, str] = {}
+    for g, members in employees_g.items():
+        best_day, best_count = None, -1
+        for day in days:
+            cnt = sum(1 for e in members if assignment.get(day, {}).get(e) is not None)
+            if cnt > best_count:
+                best_count = cnt
+                best_day = day
+        result[g] = best_day if best_day is not None else (days[0] if days else "")
+    return result
+
+
+def _isolated_employees(instance: dict, assignment: Dict[str, Dict[str, Optional[str]]]) -> Tuple[int, Dict[str, int]]:
+    employees_g = instance.get("Employees_G", {})
+    desks_z = instance.get("Desks_Z", {})
+    d2z = build_desk_to_zone(desks_z)
+    days = _day_order(instance)
+    total = 0
+    per_day: Dict[str, int] = {}
+    emp2g: Dict[str, Optional[str]] = {}
+    for g, members in employees_g.items():
+        for e in members:
+            emp2g[e] = g
+    for day in days:
+        m = assignment.get(day, {})
+        group_zone = defaultdict(Counter)
+        for e, d in m.items():
+            if d is None:
+                continue
+            g = emp2g.get(e)
+            if not g:
+                continue
+            z = d2z.get(d)
+            if z:
+                group_zone[g][z] += 1
+        isolated = 0
+        for e, d in m.items():
+            if d is None:
+                continue
+            g = emp2g.get(e)
+            if not g:
+                continue
+            z = d2z.get(d)
+            if not z:
+                continue
+            if group_zone[g][z] <= 1:
+                isolated += 1
+        per_day[day] = isolated
+        total += isolated
+    return total, per_day
+
+
+def validate_assignment(instance: dict, assignment: Dict[str, Dict[str, Optional[str]]]) -> Tuple[bool, List[str]]:
+    errors: List[str] = []
+    days = instance.get("Days", [])
+    employees = set(instance.get("Employees", []))
+    desks = set(instance.get("Desks", []))
+
+    for day in days:
+        if day not in assignment:
+            errors.append(f"Falta el día en la solución: {day}")
+            continue
+
+        mapping = assignment[day]
+        missing = [e for e in employees if e not in mapping]
+        if missing:
+            errors.append(f"Día {day}: faltan empleados {missing}")
+
+        used = [d for d in mapping.values() if d is not None]
+        bad = [d for d in used if d not in desks]
+        if bad:
+            errors.append(f"Día {day}: escritorios inexistentes {sorted(set(bad))}")
+        seen, dup = set(), set()
+        for d in used:
+            if d in seen:
+                dup.add(d)
+            else:
+                seen.add(d)
+        if dup:
+            errors.append(f"Día {day}: escritorios duplicados {sorted(dup)}")
+
+    return (len(errors) == 0, errors)
+
+
+def report_assignment(instance: dict, assignment: Dict[str, Dict[str, Optional[str]]]) -> None:
+    desks_e = instance.get("Desks_E", {})
+    employees_g = instance.get("Employees_G", {})
+    desks_z = instance.get("Desks_Z", {})
+    d2z = build_desk_to_zone(desks_z)
+    days = instance.get("Days", [])
+    employees = instance.get("Employees", [])
+
+    total_c1 = total_c2 = total_c3 = 0
+    print("Reporte por día:")
+    for day in days:
+        c1 = 0
+        for e in employees:
+            d = assignment[day].get(e)
+            if d and d in desks_e.get(e, []):
+                c1 += 1
+        c2 = 0
+        for g, members in employees_g.items():
+            z_count = Counter()
+            for e in members:
+                d = assignment[day].get(e)
+                if d:
+                    z = d2z.get(d)
+                    if z:
+                        z_count[z] += 1
+            if z_count:
+                c2 += z_count.most_common(1)[0][1]
+        z_occ = Counter()
+        for e in employees:
+            d = assignment[day].get(e)
+            if d:
+                z = d2z.get(d)
+                if z:
+                    z_occ[z] += 1
+        c3 = 0
+        if z_occ:
+            mx, mn = max(z_occ.values()), min(z_occ.values())
+            c3 = -(mx - mn)
+        assigned = sum(1 for e in employees if assignment[day].get(e) is not None)
+        print(f"- {day}: asignados={assigned} | C1={c1} C2={c2} C3={c3}")
+        total_c1 += c1
+        total_c2 += c2
+        total_c3 += c3
+    print(f"Totales: C1={total_c1} C2={total_c2} C3={total_c3}")
+
+
+def export_csv_template(instance: dict, assignment: Dict[str, Dict[str, Optional[str]]], export_dir: str) -> None:
+    os.makedirs(export_dir, exist_ok=True)
+    days = _day_order(instance)
+    employees = instance.get("Employees", [])
+
+    emp_file = os.path.join(export_dir, "EmployeeAssignment.csv")
+    with open(emp_file, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Employee"] + days)
+        for e in employees:
+            row = [e]
+            for day in days:
+                val = assignment.get(day, {}).get(e)
+                row.append(val if val is not None else "none")
+            w.writerow(row)
+
+    gmd = _groups_meeting_day(instance, assignment)
+    gmd_file = os.path.join(export_dir, "Groups_Meeting_day.csv")
+    with open(gmd_file, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Group", "MeetingDay"])
+        for g in instance.get("Employees_G", {}).keys():
+            w.writerow([g, gmd.get(g, "")])
+
+    valid = 0
+    for day in days:
+        valid += sum(1 for e in employees if assignment.get(day, {}).get(e) is not None)
+    c1, c2, c3 = score_solution_lex(instance, assignment)
+    iso_total, _ = _isolated_employees(instance, assignment)
+    sum_file = os.path.join(export_dir, "Summary.csv")
+    with open(sum_file, "w", encoding="utf-8", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["Valid_assignments", "Employee_preferences", "Isolated_employees", "C2", "C3"])
+        w.writerow([valid, c1, iso_total, c2, c3])
+
 # --- Recocido Simulado ---
 def generar_vecino_swap(assignment, instance):
     days = instance.get("Days", [])
@@ -186,10 +363,17 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42, help="Semilla para aleatorización")
     parser.add_argument("--top-k", type=int, default=3, help="Top-k preferencias a muestrear")
     parser.add_argument("--iters", type=int, default=1000, help="Iteraciones por temperatura")
+    parser.add_argument("--tinit", type=float, default=200.0, help="Temperatura inicial")
+    parser.add_argument("--tfinal", type=float, default=1.0, help="Temperatura final")
+    parser.add_argument("--alpha", type=float, default=0.95, help="Factor de enfriamiento")
     parser.add_argument("--stdout", action="store_true",
                         help="Imprime la solución por stdout en lugar de escribir archivo")
     parser.add_argument("--report", action="store_true", help="Imprime un reporte por día y totales")
     parser.add_argument("--validate", action="store_true", help="Valida la solución antes de guardar")
+    parser.add_argument("--export-csv", action="store_true",
+                        help="Exporta CSVs (EmployeeAssignment, Groups_Meeting_day, Summary)")
+    parser.add_argument("--export-dir", default=None,
+                        help="Carpeta para exportación CSV (por defecto usa --outdir/csv_export)")
     args = parser.parse_args()
 
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -230,17 +414,24 @@ if __name__ == "__main__":
         assignment,
         evaluar=_score,
         generar_vecino=lambda s: generar_vecino_swap(s, instance),
-        T_inicial=200.0, T_final=1.0, alpha=0.95, iter_por_temp=args.iters
+        T_inicial=args.tinit, T_final=args.tfinal, alpha=args.alpha, iter_por_temp=args.iters
     )
     after = score_solution_lex(instance, assignment)
     print("Puntaje antes (C1, C2, C3):", before)
     print("Puntaje después (C1, C2, C3):", after)
 
-    # Validación
-    # Puedes copiar la función validate_assignment de entrega1.py si la necesitas
+    if args.validate:
+        ok, errs = validate_assignment(instance, assignment)
+        if ok:
+            print("Validación: OK")
+        else:
+            print("Validación: errores encontrados:")
+            for e in errs:
+                print(" -", e)
+            sys.exit(2)
 
-    # Reporte
-    # Puedes copiar la función report_assignment de entrega1.py si la necesitas
+    if args.report:
+        report_assignment(instance, assignment)
 
     # Escritura
     if args.stdout:
@@ -255,5 +446,13 @@ if __name__ == "__main__":
             print("No pude escribir el archivo de salida:", e)
             print("Directorio existe?", os.path.isdir(os.path.dirname(out_file)), "->", os.path.dirname(out_file))
             raise
+
+    if args.export_csv:
+        export_dir = args.export_dir if args.export_dir else os.path.join(out_dir, "csv_export")
+        export_dir = os.path.expanduser(os.path.expandvars(export_dir))
+        if not os.path.isabs(export_dir):
+            export_dir = os.path.join(BASE_DIR, export_dir)
+        export_csv_template(instance, assignment, export_dir)
+        print("-CSVs exportados en:", export_dir)
 
     print("Fin.")

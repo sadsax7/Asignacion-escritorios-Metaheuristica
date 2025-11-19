@@ -16,6 +16,10 @@ def lex_better(a, b):
 def map_method_label(method: str) -> str:
     """Mapea variantes de nombre de método a 'SA' o 'ILS' cuando corresponde."""
     m = (method or "").lower()
+    if m.startswith("ent1"):
+        return method
+    if "ga" == m:
+        return "GA"
     if "ils" in m:
         return "ILS"
     if "sa" in m or "sim" in m or "recoc" in m or "anneal" in m:
@@ -80,25 +84,24 @@ def main():
         insts = sorted({inst for (inst, _) in summaries.keys()})
         for inst in insts:
             f.write(f"**{inst}**\n")
-            # listar métodos encontrados para esta instancia (ya mapeados a SA/ILS cuando aplique)
             methods = sorted([m for (i, m) in summaries.keys() if i == inst])
+            best_method = None
+            best_avg = None
             for m in methods:
                 s = summaries.get((inst, m))
                 f.write(f"- {m}: ")
                 if s:
-                    f.write(f"avg={tuple(round(x,3) for x in s['avg'])}, best={s['best']}, avg_time={round(s['avg_rt'],6)}s\n")
+                    avg_tuple = tuple(round(x, 3) for x in s['avg'])
+                    f.write(f"avg={avg_tuple}, best={s['best']}, avg_time={round(s['avg_rt'],6)}s\n")
+                    if best_avg is None or lex_better(s['avg'], best_avg):
+                        best_avg = s['avg']
+                        best_method = m
                 else:
                     f.write("(sin corridas)\n")
-            # Si existen SA e ILS, comparar y dar conclusión; si sólo uno está presente indicarlo
-            s_sa = summaries.get((inst, "SA"))
-            s_ils = summaries.get((inst, "ILS"))
-            if s_sa or s_ils:
-                if s_sa and s_ils:
-                    better = "SA" if lex_better(s_sa["avg"], s_ils["avg"]) else "ILS"
-                    f.write(f"- Conclusión: promedio lexicográfico favorece {better}.\n\n")
-                else:
-                    present = "SA" if s_sa else "ILS"
-                    f.write(f"- Conclusión: sólo hay corridas para {present}.\n\n")
+            if best_method:
+                f.write(f"- Conclusión: promedio lexicográfico favorece {best_method}.\n\n")
+            else:
+                f.write("- Conclusión: no hay datos.\n\n")
         
     print("Wrote:", args.out_csv)
     print("Wrote:", args.out_md)
@@ -107,4 +110,3 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

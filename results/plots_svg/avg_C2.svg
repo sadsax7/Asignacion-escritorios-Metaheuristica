@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="400">
+<style>.title{font: bold 18px sans-serif;} .label{font: 12px sans-serif;}</style>
+<text class="title" x="400.0" y="30" text-anchor="middle">Promedio C2 por método</text>
+<text class="label" x="30" y="200.0" transform="rotate(-90,30,200.0)">C2 promedio</text>
+<line x1="80" y1="340" x2="80" y2="60" stroke="#333" stroke-width="2"/>
+<line x1="80" y1="340" x2="760" y2="340" stroke="#333" stroke-width="2"/>
+<rect x="100.40" y="120.51" width="95.20" height="219.49" fill="#1f77b4"/>
+<text class="label" x="148.00" y="360" text-anchor="middle">ENT1_LOCAL</text>
+<text class="label" x="148.00" y="115.51" text-anchor="middle">98.53</text>
+<rect x="236.40" y="80.34" width="95.20" height="259.66" fill="#ff7f0e"/>
+<text class="label" x="284.00" y="360" text-anchor="middle">ENT1_SA</text>
+<text class="label" x="284.00" y="75.34" text-anchor="middle">116.57</text>
+<rect x="372.40" y="110.79" width="95.20" height="229.21" fill="#2ca02c"/>
+<text class="label" x="420.00" y="360" text-anchor="middle">GA</text>
+<text class="label" x="420.00" y="105.79" text-anchor="middle">102.90</text>
+<rect x="508.40" y="106.41" width="95.20" height="233.59" fill="#d62728"/>
+<text class="label" x="556.00" y="360" text-anchor="middle">ILS</text>
+<text class="label" x="556.00" y="101.41" text-anchor="middle">104.87</text>
+<rect x="644.40" y="60.00" width="95.20" height="280.00" fill="#9467bd"/>
+<text class="label" x="692.00" y="360" text-anchor="middle">SA</text>
+<text class="label" x="692.00" y="55.00" text-anchor="middle">125.70</text>
+</svg>

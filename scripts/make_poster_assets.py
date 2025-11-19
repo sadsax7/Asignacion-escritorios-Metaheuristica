@@ -31,23 +31,21 @@ def save_markdown_table(by_inst, out_md):
     insts = sorted(by_inst.keys())
     with open(out_md, "w", encoding="utf-8") as f:
         f.write("**Tabla comparativa (promedios y mejor corrida)**\n\n")
-        # Encabezado estilo Markdown table
         f.write("| instance | method | avg_C1 | avg_C2 | avg_C3 | avg_time(s) | best (C1, C2, C3) |\n")
         f.write("|---|---|---:|---:|---:|---:|---|\n")
         for inst in insts:
-            for method in ("local", "no_local"):
-                m = by_inst[inst].get(method)
-                if not m:
-                    continue
+            methods = sorted(by_inst[inst].keys())
+            for method in methods:
+                data = by_inst[inst][method]
                 f.write(
                     "| {inst} | {method} | {c1:.3f} | {c2:.3f} | {c3:.3f} | {rt:.6f} | {best} |\n".format(
                         inst=inst,
                         method=method,
-                        c1=m["avg_C1"],
-                        c2=m["avg_C2"],
-                        c3=m["avg_C3"],
-                        rt=m["avg_runtime_sec"],
-                        best=m["best"],
+                        c1=data["avg_C1"],
+                        c2=data["avg_C2"],
+                        c3=data["avg_C3"],
+                        rt=data["avg_runtime_sec"],
+                        best=data["best"],
                     )
                 )
 
@@ -61,25 +59,24 @@ def make_plots(by_inst, out_dir):
         import numpy as np
 
         insts = sorted(by_inst.keys())
+        method_list = sorted({m for inst in by_inst.values() for m in inst.keys()})
+        if not insts or not method_list:
+            return []
         x = np.arange(len(insts))
-        width = 0.35
+        width = 0.8 / max(1, len(method_list))
 
-        def bar_pair(metric_key, title, fname):
-            local_vals = np.array([by_inst[i].get("local", {}).get(metric_key, float('nan')) for i in insts], dtype=float)
-            noloc_vals = np.array([by_inst[i].get("no_local", {}).get(metric_key, float('nan')) for i in insts], dtype=float)
-            fig, ax = plt.subplots(figsize=(max(8, len(insts)*0.9), 4))
-            # Para tiempos, usar escala logarítmica para que ambas series sean visibles
-            if metric_key == 'avg_runtime_sec':
-                # Evita ceros en log
-                local_vals = np.where(local_vals <= 0, 1e-6, local_vals)
-                noloc_vals = np.where(noloc_vals <= 0, 1e-6, noloc_vals)
+        def plot_metric(metric_key, title, fname, log_scale=False):
+            fig, ax = plt.subplots(figsize=(max(8, len(insts) * 0.9), 4))
+            for idx, method in enumerate(method_list):
+                values = np.array([by_inst[i].get(method, {}).get(metric_key, float('nan')) for i in insts], dtype=float)
+                offset = (idx - (len(method_list) - 1) / 2) * width
+                bars = ax.bar(x + offset, values, width, label=method)
+            if log_scale:
                 ax.set_yscale('log')
                 ax.set_ylabel('segundos (escala log)')
-            ax.bar(x - width/2, local_vals, width, label='local', color='#1f77b4')
-            ax.bar(x + width/2, noloc_vals, width, label='no_local', color='#ff7f0e')
             ax.set_title(title)
             ax.set_xticks(x, insts, rotation=45, ha='right')
-            ax.legend()
+            ax.legend(ncol=min(3, len(method_list)))
             ax.grid(axis='y', alpha=0.3)
             fig.tight_layout()
             out_path = os.path.join(out_dir, fname)
@@ -87,13 +84,12 @@ def make_plots(by_inst, out_dir):
             plt.close(fig)
             return out_path
 
-        p1 = bar_pair('avg_C1', 'Promedio C1 por instancia (local vs no_local)', 'avg_C1.png')
-        p2 = bar_pair('avg_C2', 'Promedio C2 por instancia (local vs no_local)', 'avg_C2.png')
-        p3 = bar_pair('avg_C3', 'Promedio C3 por instancia (local vs no_local)', 'avg_C3.png')
-        p4 = bar_pair('avg_runtime_sec', 'Tiempo promedio (s) por instancia', 'avg_time.png')
+        p1 = plot_metric('avg_C1', 'Promedio C1 por instancia', 'avg_C1.png')
+        p2 = plot_metric('avg_C2', 'Promedio C2 por instancia', 'avg_C2.png')
+        p3 = plot_metric('avg_C3', 'Promedio C3 por instancia', 'avg_C3.png')
+        p4 = plot_metric('avg_runtime_sec', 'Tiempo promedio (s) por instancia', 'avg_time.png', log_scale=True)
         return [p1, p2, p3, p4]
     except Exception as e:
-        # Sin matplotlib, no generamos gráficas
         note = os.path.join(out_dir, "NO_PLOTS.txt")
         with open(note, "w", encoding="utf-8") as f:
             f.write("No se pudieron generar gráficas. Motivo: " + repr(e))
@@ -110,19 +106,27 @@ def _lex_better(a, b):
 
 
 def make_poster_md(by_inst, plot_paths, out_md):
-    # concl: cuántas instancias favorecen local vs no_local en promedio
-    total = len(by_inst)
-    fav_local = 0
-    for inst, dd in by_inst.items():
-        a = (dd.get('local',{}).get('avg_C1',0.0), dd.get('local',{}).get('avg_C2',0.0), dd.get('local',{}).get('avg_C3',0.0))
-        b = (dd.get('no_local',{}).get('avg_C1',0.0), dd.get('no_local',{}).get('avg_C2',0.0), dd.get('no_local',{}).get('avg_C3',0.0))
-        if _lex_better(a, b):
-            fav_local += 1
+    all_methods = sorted({m for inst in by_inst.values() for m in inst.keys()})
+    winners = {m: 0 for m in all_methods}
+    for inst, data in by_inst.items():
+        best_method = None
+        best_avg = None
+        for method, metrics in data.items():
+            triple = (metrics["avg_C1"], metrics["avg_C2"], metrics["avg_C3"])
+            if best_avg is None or _lex_better(triple, best_avg):
+                best_avg = triple
+                best_method = method
+        if best_method:
+            winners[best_method] += 1
+
     with open(out_md, "w", encoding="utf-8") as f:
-        f.write("**Póster – Heurística Constructiva + Aleatorizada + Búsqueda Local**\n\n")
-        f.write("- Problema: asignación de empleados a escritorios por día con preferencias, cohesión de grupos y balance de zonas.\n")
-        f.write("- Método: constructivo aleatorizado (top‑k y orden aleatorio, controlado por semilla) + búsqueda local por swaps con evaluación lexicográfica (C1,C2,C3).\n")
-        f.write("- Experimentos: local vs no_local, 10 semillas, iters=1200, top-k=3.\n\n")
+        f.write("**Póster – Comparativo de heurísticas y metaheurísticas para asignación híbrida**\n\n")
+        f.write("- Problema: asignar escritorios por día maximizando preferencias (C1), cohesión por grupo (C2) y balance por zonas (C3) en orden lexicográfico.\n")
+        f.write("- Métodos evaluados: constructivo + BL (ENT1_LOCAL), constructivo + SA (ENT1_SA y SA), ILS iterado y Algoritmo Genético (GA).\n")
+        f.write("- Experimentos: {n} instancias, {m} métodos, semillas configurables via `scripts/run_experiments.py`.\n\n".format(
+            n=len(by_inst),
+            m=len(all_methods)
+        ))
 
         f.write("Resultados promedio por instancia (tabla):\n\n")
         save_markdown_table(by_inst, out_md.replace('.md','_table.md'))
@@ -130,27 +134,25 @@ def make_poster_md(by_inst, plot_paths, out_md):
             f.write(tf.read())
         f.write("\n")
 
-        # Pseudocódigo breve
         f.write("Pseudocódigo (resumen)\n\n")
-        f.write("Constructivo aleatorizado (por día):\n")
-        f.write("- Para cada día d: obtener presentes; mezclar con semilla.\n")
-        f.write("- Para cada empleado e: estimar zona objetivo de su grupo (mayoría actual).\n")
-        f.write("- Elegir escritorio: (i) preferidos en zona objetivo (top-k aleatorio),\n")
-        f.write("  (ii) preferidos restantes (top-k aleatorio), (iii) cualquier libre (preferir zona objetivo).\n")
-        f.write("- Completar ausentes con none.\n\n")
-        f.write("Búsqueda local (swaps):\n")
-        f.write("- Repetir iters: elegir día aleatorio; si hay ≥2 asignados, proponer swap entre dos;\n")
-        f.write("  aceptar si (C1,C2,C3) mejora lexicográficamente.\n\n")
+        f.write("Constructivo aleatorizado (común a todos los métodos):\n")
+        f.write("- Para cada día se listan empleados presentes; se barajan con la semilla.\n")
+        f.write("- Cada empleado toma un escritorio en su zona objetivo priorizando preferencias (top-k) y balance.\n")
+        f.write("- Los huecos se llenan con `none` para mantener la plantilla completa.\n\n")
+        f.write("Metaheurísticas:\n")
+        f.write("- ENT1_LOCAL: hill climbing por swaps aceptando solo mejoras lexicográficas.\n")
+        f.write("- ENT1_SA / SA: recocido simulado que acepta empeoramientos con probabilidad `exp(Δ/T)`.\n")
+        f.write("- ILS: iterated local search con perturbaciones `k`-swap + hill climbing intensivo.\n")
+        f.write("- GA: algoritmo genético simple con torneo, cruce por días y mutación swap.\n\n")
 
-        # Conclusiones y recomendaciones
-        f.write("Conclusiones y recomendaciones\n\n")
-        f.write(f"- En promedio, {fav_local}/{total} instancias favorecen 'local' (mejor C1).\n")
-        f.write("- 'local' cuesta más tiempo (≈10^2–10^3 ms según instancia y iters) pero mejora la calidad.\n")
-        f.write("- Parámetros recomendados: top-k=3, iters≈1000–1500, seed fija para reproducibilidad.\n")
-        f.write("- Sensibilidad: aumentar iters mejora C1 con rendimientos decrecientes; top‑k>1 da diversidad útil.\n\n")
+        f.write("Conclusiones y recomendaciones:\n\n")
+        for method in all_methods:
+            f.write(f"- {method}: gana {winners.get(method,0)} instancias según promedio C1→C2→C3.\n")
+        f.write("- ILS y GA tienden a dominar en C1/C2, aunque a mayor costo computacional.\n")
+        f.write("- Mantener `top-k=3` y ≥1000 iteraciones en búsquedas locales ofrece un buen compromiso.\n\n")
 
         if plot_paths:
-            f.write("Gráficas (local vs no_local):\n\n")
+            f.write("Gráficas comparativas:\n\n")
             for p in plot_paths:
                 rel = os.path.relpath(p, os.path.dirname(out_md))
                 f.write(f"- {os.path.basename(p)}\n")

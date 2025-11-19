@@ -6,6 +6,7 @@
 import json
 import random
 from collections import defaultdict, Counter
+import math
 from typing import Dict, List, Tuple, Optional
 
 
@@ -130,6 +131,12 @@ def score_solution_lex(instance: dict, assignment: Dict[str, Dict[str, Optional[
     return (c1_pref_hits, c2_group_cohesion, c3_balance)
 
 
+def _lex_to_scalar(score: Tuple[int, int, int]) -> int:
+    """Convierte el puntaje (C1, C2, C3) a un escalar para comparar en SA."""
+    c1, c2, c3 = score
+    return c1 * 10000 + c2 * 100 + c3
+
+
 # ---------- 3) Búsqueda local por swaps ----------
 def local_search_swaps(instance: dict, assignment: Dict[str, Dict[str, Optional[str]]],iters: int = 500, seed: int = 123) -> Dict[str, Dict[str, Optional[str]]]:
     rng = random.Random(seed)
@@ -155,6 +162,55 @@ def local_search_swaps(instance: dict, assignment: Dict[str, Dict[str, Optional[
         new_score = score_solution_lex(instance, new)
         if new_score > best_score:  # comparación lexicográfica
             best, best_score = new, new_score
+
+    return best
+
+
+def simulated_annealing_swaps(instance: dict,
+                              assignment: Dict[str, Dict[str, Optional[str]]],
+                              iters_per_temp: int = 200,
+                              t_inicial: float = 200.0,
+                              t_final: float = 1.0,
+                              alpha: float = 0.95,
+                              seed: int = 123) -> Dict[str, Dict[str, Optional[str]]]:
+    """
+    Metaheurística basada en búsqueda local (recocido simulado con swaps).
+    Parte de la solución constructiva y aplica intercambios aceptando
+    empeoramientos con probabilidad controlada por la temperatura.
+    """
+    rng = random.Random(seed)
+    current = {d: m.copy() for d, m in assignment.items()}
+    best = {d: m.copy() for d, m in assignment.items()}
+    current_score = score_solution_lex(instance, current)
+    best_score = current_score
+    current_val = _lex_to_scalar(current_score)
+    best_val = current_val
+    days = instance.get("Days", [])
+    employees = instance.get("Employees", [])
+    T = t_inicial
+
+    while T > t_final and days:
+        for _ in range(iters_per_temp):
+            day = rng.choice(days)
+            assigned_today = [e for e in employees if current[day].get(e) is not None]
+            if len(assigned_today) < 2:
+                continue
+            a, b = rng.sample(assigned_today, 2)
+            neighbor = {d: m.copy() for d, m in current.items()}
+            neighbor[day][a], neighbor[day][b] = neighbor[day][b], neighbor[day][a]
+            neighbor_score = score_solution_lex(instance, neighbor)
+            neighbor_val = _lex_to_scalar(neighbor_score)
+            delta = neighbor_val - current_val
+
+            if delta > 0 or rng.random() < math.exp(delta / T):
+                current = neighbor
+                current_score = neighbor_score
+                current_val = neighbor_val
+                if neighbor_val > best_val:
+                    best = {d: m.copy() for d, m in current.items()}
+                    best_score = neighbor_score
+                    best_val = neighbor_val
+        T *= alpha
 
     return best
 
@@ -372,7 +428,13 @@ if __name__ == "__main__":
     parser.add_argument("--no-local-search", dest="local_search", action="store_false",
                         help="Desactiva búsqueda local por swaps")
     parser.set_defaults(local_search=True)
+    parser.add_argument("--method", choices=["constructive", "local", "sa"], default=None,
+                        help="Elige el método de mejora: constructivo puro, búsqueda local o recocido (SA). Por defecto usa búsqueda local.")
     parser.add_argument("--iters", type=int, default=1000, help="Iteraciones de búsqueda local")
+    parser.add_argument("--sa-iters", type=int, default=200, help="Iteraciones por temperatura en SA")
+    parser.add_argument("--tinit", type=float, default=200.0, help="Temperatura inicial para SA")
+    parser.add_argument("--tfinal", type=float, default=1.0, help="Temperatura final para SA")
+    parser.add_argument("--alpha", type=float, default=0.95, help="Factor de enfriamiento para SA")
     parser.add_argument("--stdout", action="store_true",
                         help="Imprime la solución por stdout en lugar de escribir archivo")
     parser.add_argument("--report", action="store_true", help="Imprime un reporte por día y totales")
@@ -411,16 +473,33 @@ if __name__ == "__main__":
         instance, seed=args.seed, randomize=True, top_k_pref=args.top_k
     )
 
-    # Mejora con búsqueda local (por defecto activa; desactivable con --no-local-search)
-    if args.local_search:
-        def _score(s): return score_solution_lex(instance, s)
-        before = _score(assignment)
+    # Determinar método a aplicar
+    method = args.method
+    if method is None:
+        method = "local" if args.local_search else "constructive"
+
+    if method == "local":
+        before = score_solution_lex(instance, assignment)
         assignment = local_search_swaps(instance, assignment, iters=args.iters, seed=args.seed)
-        after = _score(assignment)
-        print("Puntaje antes (C1, C2, C3):", before)
-        print("Puntaje después (C1, C2, C3):", after)
+        after = score_solution_lex(instance, assignment)
+        print("[Búsqueda local] Puntaje antes (C1, C2, C3):", before)
+        print("[Búsqueda local] Puntaje después (C1, C2, C3):", after)
+    elif method == "sa":
+        before = score_solution_lex(instance, assignment)
+        assignment = simulated_annealing_swaps(
+            instance,
+            assignment,
+            iters_per_temp=args.sa_iters,
+            t_inicial=args.tinit,
+            t_final=args.tfinal,
+            alpha=args.alpha,
+            seed=args.seed
+        )
+        after = score_solution_lex(instance, assignment)
+        print("[SA] Puntaje antes (C1, C2, C3):", before)
+        print("[SA] Puntaje después (C1, C2, C3):", after)
     else:
-        print("Puntaje (C1, C2, C3):", score_solution_lex(instance, assignment))
+        print("[Constructivo] Puntaje (C1, C2, C3):", score_solution_lex(instance, assignment))
 
     # Validación
     if args.validate:
@@ -463,4 +542,3 @@ if __name__ == "__main__":
         export_csv_template(instance, assignment, export_dir)
         print("-CSVs exportados en:", export_dir)
     print("Fin.")
-
