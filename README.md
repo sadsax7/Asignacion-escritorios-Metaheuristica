@@ -1,7 +1,6 @@
 **Proyecto Heurística – Asignación de Puestos en Trabajos Híbridos**
 
-- Autoría del código base: ver `instances/entrega2.py` & `instances/entrega2_ILS.py` (Universidad EAFIT, 2025)
-- Este repo contiene un heurístico con construcción aleatorizada, recocido simulado y ILS como metaheuristico de busqueda local
+- Autoría del código/proyecto: Alejandro Arango Mejía y Juan Jose Muñoz
 
 **Contenido**
 - ¿Qué resuelve? y formato de instancias
